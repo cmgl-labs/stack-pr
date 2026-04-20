@@ -1015,6 +1015,7 @@ def deduce_base(args: CommonArgs) -> CommonArgs:
         args.branch_name_template,
         args.show_tips,
         args.land_disabled,
+        args.sync_working_branch,
     )
 
 
