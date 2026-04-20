@@ -1594,6 +1594,13 @@ def create_argparser(
         default=config.getboolean("common", "show_tips", fallback=True),
         help="Show or hide usage tips after commands.",
     )
+    common_parser.add_argument(
+        "-s",
+        "--stash",
+        action="store_true",
+        default=config.getboolean("common", "stash", fallback=False),
+        help="Stash all uncommitted changes before running the command",
+    )
 
     parser_submit = subparsers.add_parser(
         "submit",
@@ -1627,13 +1634,6 @@ def create_argparser(
             default=config.get("repo", "reviewer", fallback=""),
         ),
         help="List of reviewers for the PR",
-    )
-    parser_submit.add_argument(
-        "-s",
-        "--stash",
-        action="store_true",
-        default=config.getboolean("common", "stash", fallback=False),
-        help="Stash all uncommited changes before submitting the PR",
     )
     parser_submit.add_argument(
         "--sync-working-branch",
@@ -1719,7 +1719,7 @@ def main() -> None:  # noqa: PLR0912
     get_branch_name_base(common_args.branch_name_template)
     stashed_changes = False
     try:
-        if args.command in ["submit", "export"] and args.stash:
+        if args.command in ["submit", "export", "land", "abandon"] and args.stash:
             result = run_shell_command(
                 ["git", "stash", "save"], quiet=not common_args.verbose
             )
@@ -1760,7 +1760,7 @@ def main() -> None:  # noqa: PLR0912
             print_cmd_failure_details(exc)
         raise
     finally:
-        if args.command in ["submit", "export"] and args.stash and stashed_changes:
+        if args.command in ["submit", "export", "land", "abandon"] and args.stash and stashed_changes:
             run_shell_command(["git", "stash", "pop"], quiet=not common_args.verbose)
 
 
