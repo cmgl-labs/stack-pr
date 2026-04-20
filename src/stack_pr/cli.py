@@ -938,9 +938,12 @@ class CommonArgs:
     show_tips: bool
     land_disabled: bool
     sync_working_branch: bool
+    merge_method: str
 
     @classmethod
-    def from_args(cls, args: argparse.Namespace, *, land_disabled: bool) -> CommonArgs:
+    def from_args(
+        cls, args: argparse.Namespace, *, land_disabled: bool, merge_method: str
+    ) -> CommonArgs:
         return cls(
             args.base,
             args.head,
@@ -952,6 +955,7 @@ class CommonArgs:
             args.show_tips,
             land_disabled,
             args.sync_working_branch,
+            merge_method,
         )
 
 
@@ -1035,6 +1039,7 @@ def deduce_base(args: CommonArgs) -> CommonArgs:
         args.show_tips,
         args.land_disabled,
         args.sync_working_branch,
+        args.merge_method,
     )
 
 
@@ -1219,7 +1224,9 @@ def rebase_pr(e: StackEntry, remote: str, target: str, *, verbose: bool) -> None
     )
 
 
-def land_pr(e: StackEntry, remote: str, target: str, *, verbose: bool) -> None:
+def land_pr(
+    e: StackEntry, remote: str, target: str, *, verbose: bool, merge_method: str = "squash"
+) -> None:
     log(b("Landing ") + e.pprint(links=False), level=2)
     # Rebase the head branch to the most recent 'origin/main'
     run_shell_command(["git", "fetch", "--prune", remote], quiet=not verbose)
@@ -1243,8 +1250,9 @@ def land_pr(e: StackEntry, remote: str, target: str, *, verbose: bool) -> None:
     pr_id = last(e.pr)
     title = f"{lines[0]} (#{pr_id})"
     pr_body = "\n".join(lines[1:]) or " "
+    merge_cmd = ["gh", "pr", "merge", e.pr, f"--{merge_method}", "-t", title, "-F", "-"]
     run_shell_command(
-        ["gh", "pr", "merge", e.pr, "--squash", "-t", title, "-F", "-"],
+        merge_cmd,
         input=pr_body.encode(),
         quiet=not verbose,
     )
@@ -1320,7 +1328,13 @@ def command_land(args: CommonArgs) -> None:
     verify(st, check_base=True)
 
     # All good, land the bottommost PR!
-    land_pr(st[0], remote=args.remote, target=args.target, verbose=args.verbose)
+    land_pr(
+        st[0],
+        remote=args.remote,
+        target=args.target,
+        verbose=args.verbose,
+        merge_method=args.merge_method,
+    )
 
     # The rest of the stack now needs to be rebased.
     if len(st) > 1:
@@ -1664,10 +1678,16 @@ def create_argparser(
 
     land_style = config.get("land", "style", fallback="bottom-only")
     if land_style == "bottom-only":
-        subparsers.add_parser(
+        parser_land = subparsers.add_parser(
             "land",
             help="Land the bottom-most PR in the current stack",
             parents=[common_parser],
+        )
+        parser_land.add_argument(
+            "--merge-method",
+            default=config.get("land", "merge_method", fallback="squash"),
+            choices=["squash", "merge", "rebase"],
+            help="Merge method to use when landing PRs (default: squash)",
         )
     subparsers.add_parser(
         "abandon",
@@ -1728,6 +1748,7 @@ def main() -> None:  # noqa: PLR0912
         land_disabled=(
             config.get("land", "style", fallback="bottom-only") == "disable"
         ),
+        merge_method=getattr(args, "merge_method", "squash"),
     )
 
     if common_args.verbose:
