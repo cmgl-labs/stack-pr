@@ -918,6 +918,7 @@ class CommonArgs:
     branch_name_template: str
     show_tips: bool
     land_disabled: bool
+    sync_working_branch: bool
 
     @classmethod
     def from_args(cls, args: argparse.Namespace, *, land_disabled: bool) -> CommonArgs:
@@ -931,6 +932,7 @@ class CommonArgs:
             args.branch_name_template,
             args.show_tips,
             land_disabled,
+            getattr(args, "sync_working_branch", False),
         )
 
 
@@ -1151,6 +1153,22 @@ def command_submit(
             ],
             quiet=not args.verbose,
         )
+        # If configured, force-push the working branch to keep it in sync
+        # with remote and avoid confusing "incoming changes" after the rebase.
+        if args.sync_working_branch:
+            try:
+                run_shell_command(
+                    ["git", "rev-parse", "--abbrev-ref", f"{current_branch}@{{u}}"],
+                    quiet=True,
+                    check=True,
+                )
+                log(h(f"Syncing '{current_branch}' with remote"), level=2)
+                run_shell_command(
+                    ["git", "push", "-f", args.remote, current_branch],
+                    quiet=not args.verbose,
+                )
+            except Exception:
+                pass  # No upstream tracking branch, nothing to sync
     else:
         log(h(f"Checking out the original branch '{current_branch}'"), level=2)
         run_shell_command(["git", "checkout", current_branch], quiet=not args.verbose)
@@ -1616,6 +1634,12 @@ def create_argparser(
         action="store_true",
         default=config.getboolean("common", "stash", fallback=False),
         help="Stash all uncommited changes before submitting the PR",
+    )
+    parser_submit.add_argument(
+        "--sync-working-branch",
+        action=argparse.BooleanOptionalAction,
+        default=config.getboolean("common", "sync_working_branch", fallback=False),
+        help="Force-push working branch after submit to keep it in sync with remote",
     )
 
     land_style = config.get("land", "style", fallback="bottom-only")
