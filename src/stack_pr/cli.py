@@ -575,6 +575,25 @@ def draft_bitmask_type(value: str) -> list[bool]:
 # ===----------------------------------------------------------------------=== #
 # SUBMIT
 # ===----------------------------------------------------------------------=== #
+def sync_branch_with_remote(
+    branch: str, remote: str, *, verbose: bool
+) -> None:
+    """Force-push a branch to remote if it has a tracking branch."""
+    try:
+        run_shell_command(
+            ["git", "rev-parse", "--abbrev-ref", f"{branch}@{{u}}"],
+            quiet=True,
+            check=True,
+        )
+        log(h(f"Syncing '{branch}' with remote"), level=2)
+        run_shell_command(
+            ["git", "push", "-f", remote, branch],
+            quiet=not verbose,
+        )
+    except Exception:
+        pass  # No upstream tracking branch, nothing to sync
+
+
 def add_or_update_metadata(e: StackEntry, *, needs_rebase: bool, verbose: bool) -> bool:
     if needs_rebase:
         if not e.has_base() or not e.has_head():
@@ -932,7 +951,7 @@ class CommonArgs:
             args.branch_name_template,
             args.show_tips,
             land_disabled,
-            getattr(args, "sync_working_branch", False),
+            args.sync_working_branch,
         )
 
 
@@ -1157,19 +1176,9 @@ def command_submit(
         # If configured, force-push the working branch to keep it in sync
         # with remote and avoid confusing "incoming changes" after the rebase.
         if args.sync_working_branch:
-            try:
-                run_shell_command(
-                    ["git", "rev-parse", "--abbrev-ref", f"{current_branch}@{{u}}"],
-                    quiet=True,
-                    check=True,
-                )
-                log(h(f"Syncing '{current_branch}' with remote"), level=2)
-                run_shell_command(
-                    ["git", "push", "-f", args.remote, current_branch],
-                    quiet=not args.verbose,
-                )
-            except Exception:
-                pass  # No upstream tracking branch, nothing to sync
+            sync_branch_with_remote(
+                current_branch, args.remote, verbose=args.verbose
+            )
     else:
         log(h(f"Checking out the original branch '{current_branch}'"), level=2)
         run_shell_command(["git", "checkout", current_branch], quiet=not args.verbose)
@@ -1342,6 +1351,11 @@ def command_land(args: CommonArgs) -> None:
         quiet=not args.verbose,
     )
 
+    if args.sync_working_branch:
+        sync_branch_with_remote(
+            current_branch, args.remote, verbose=args.verbose
+        )
+
     log(h(blue("SUCCESS!")))
 
 
@@ -1427,6 +1441,11 @@ def command_abandon(args: CommonArgs) -> None:
     run_shell_command(
         ["git", "rebase", last_hash, current_branch], quiet=not args.verbose
     )
+
+    if args.sync_working_branch:
+        sync_branch_with_remote(
+            current_branch, args.remote, verbose=args.verbose
+        )
 
     delete_local_branches(st, verbose=args.verbose)
     delete_remote_branches(
@@ -1602,6 +1621,12 @@ def create_argparser(
         default=config.getboolean("common", "stash", fallback=False),
         help="Stash all uncommitted changes before running the command",
     )
+    common_parser.add_argument(
+        "--sync-working-branch",
+        action=argparse.BooleanOptionalAction,
+        default=config.getboolean("common", "sync_working_branch", fallback=False),
+        help="Force-push working branch after rebase to keep it in sync with remote",
+    )
 
     parser_submit = subparsers.add_parser(
         "submit",
@@ -1635,12 +1660,6 @@ def create_argparser(
             default=config.get("repo", "reviewer", fallback=""),
         ),
         help="List of reviewers for the PR",
-    )
-    parser_submit.add_argument(
-        "--sync-working-branch",
-        action=argparse.BooleanOptionalAction,
-        default=config.getboolean("common", "sync_working_branch", fallback=False),
-        help="Force-push working branch after submit to keep it in sync with remote",
     )
 
     land_style = config.get("land", "style", fallback="bottom-only")
